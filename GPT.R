@@ -1,60 +1,45 @@
 secret <- function(x) {
-  UseMethod("secret")
+  if (!is.atomic(x)) {
+    stop("`secret` only supports atomic vectors.")
+  }
   structure(x, class = "secret")
 }
 
-secret.default <- function(x) {
-  if (length(x) == 0) {
-    warning("Warning: the input or output vector has lenght 0.")
-  }
-  if (!is.atomic(x)) {
-    stop("secret() only supports atomic vectors.")
-  }
+
+sec_char <- function(x) {
+  ifelse(is.na(x), NA_character_, paste0('"', strrep("*", nchar(x)), '"'))
 }
 
-secret.character = function(x){
-  result = x[!(x %in% c("Inf", "-Inf", "NaN"))]
-  result = result[!(is.na(result))]
-  result = strrep("*", nchar(result))
-  secret.default(result)
-  result
+sec_numeric <- function(x) {
+  ifelse(is.na(x), NA_character_,
+         ifelse(x < 0 , paste0("-", strrep("*", nchar(x)-1)), strrep("*", nchar(x))))
 }
 
-secret.numeric = function(x){
-  x = x[is.finite(x)]
-  out = ifelse(x < 0 , paste0("-", strrep("*", nchar(x)-1)), strrep("*", nchar(x)))
-  result = noquote(out)
-  secret.default(result)
-  result
+sec_logical <- function(x) {
+  ifelse(is.na(x), NA_character_, "*****")
 }
 
-secret.complex = function(x){
-  x = x[!(is.na(x))]
-  temp = Re(x)
-  index = which(is.finite(temp))
-  x = x[index]
+sec_complex <- function(x) {
   re = Re(x)
   im = Im(x)
   re_out=ifelse(re < 0 , paste0("-", strrep("*", nchar(re)-1)), strrep("*", nchar(re)))
   im_out=ifelse(im < 0 , paste0("-", strrep("*", nchar(im)-1),"i"), paste0("+", strrep("*", nchar(im)),"i"))
   out = paste0(re_out, im_out)
-  noquote(out)
+  ifelse(is.na(x), NA_character_,out)
 }
 
-secret.logical = function(x) {
-  x = x[!(is.na(x))]
-  result = noquote(rep("*****", length(x)))
-  secret.default(result)
-  result
+print.secret = function(x, ...) {
+  secret = switch(typeof(x),
+                   "character" = sec_char(x),
+                   "integer"   = sec_numeric(x),
+                   "double"    = sec_numeric(x),
+                   "logical"   = sec_logical(x),
+                   "complex"   = sec_complex(x),
+                   stop("Unsupported type: ", typeof(x))
+  )
+  print(noquote(secret))
 }
 
-# modify this function to print the redacted secret object
-#print.secret = function(x, ...) {
-  #return(invisible(x))
-#}
-
-
-### Example Usage
 secret(c(TRUE,FALSE))
 secret(c("TRUE","FALSE"))
 secret(c(0L,-11L))

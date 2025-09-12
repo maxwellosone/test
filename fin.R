@@ -10,6 +10,7 @@ secret.default <- function(x) {
   if (!is.atomic(x)) {
     stop("secret() only supports atomic vectors.")
   }
+  structure(x, class = "secret")
 }
 
 secret.character = function(x){
@@ -17,7 +18,7 @@ secret.character = function(x){
   result = result[!(is.na(result))]
   result = strrep("*", nchar(result))
   secret.default(result)
-  result
+  structure(result, class = "secret")
 }
 
 secret.numeric = function(x){
@@ -25,7 +26,7 @@ secret.numeric = function(x){
   out = ifelse(x < 0 , paste0("-", strrep("*", nchar(x)-1)), strrep("*", nchar(x)))
   result = noquote(out)
   secret.default(result)
-  result
+  structure(result, class = "secret")
 }
 
 secret.complex = function(x){
@@ -39,19 +40,20 @@ secret.complex = function(x){
   im_out=ifelse(im < 0 , paste0("-", strrep("*", nchar(im)-1),"i"), paste0("+", strrep("*", nchar(im)),"i"))
   out = paste0(re_out, im_out)
   noquote(out)
+  structure(out, class = "secret")
 }
 
 secret.logical = function(x) {
   x = x[!(is.na(x))]
   result = noquote(rep("*****", length(x)))
   secret.default(result)
-  result
+  structure(result, class = "secret")
 }
 
-# modify this function to print the redacted secret object
-#print.secret = function(x, ...) {
-  #return(invisible(x))
-#}
+print.secret = function(x, ...) {
+  out = unclass(x)
+  print(out)
+}
 
 
 ### Example Usage
