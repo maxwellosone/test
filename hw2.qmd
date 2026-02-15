@@ -1,0 +1,847 @@
+---
+title: Homework 2
+jupyter: python3
+---
+
+
+```{python 1_imports}
+#| include: false
+import numpy as np
+
+from scipy.special import gamma
+from scipy.integrate import quad, dblquad, tplquad
+from scipy.stats import multivariate_normal
+from scipy.linalg import solve_triangular
+
+import pandas as pd
+import polars as pl
+import re
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import time
+
+from copy import deepcopy
+
+%xmode minimal
+```
+
+## Task 1
+
+### Data
+
+```{python 2_task1_read_data}
+with open("data/small.txt") as file:
+    small = [list(x.rstrip()) for x in file.readlines()]
+
+with open("data/large.txt") as file:
+    large = [list(x.rstrip()) for x in file.readlines()]
+
+small_np = np.array(small)
+large_np = np.array(large)
+```
+
+### Base Python
+
+```{python 3_task1_advent}
+def advent_step(state):
+    """
+    Advance the Advent of Code grid by a single step a time.
+    """
+
+    rows = len(state)
+    cols = len(state[0])
+
+    right_cell = deepcopy(state)
+    tau = []
+
+    for i in range(rows):
+        for j in range(cols):
+            if state[i][j] == ">":
+                jp = (j + 1) % cols
+                if state[i][jp] == ".":  # move right only when the target is "."
+                    tau.append((i, j, jp))
+
+    for i, j, jp in tau:
+        right_cell[i][j] = "."
+        right_cell[i][jp] = ">"
+
+    moved_right = len(tau) > 0
+
+    down_cell = deepcopy(right_cell)
+    ups = []
+
+    for i in range(rows):
+        for j in range(cols):
+            if right_cell[i][j] == "v":
+                ip = (i + 1) % rows
+                if right_cell[ip][j] == ".":
+                    ups.append((i, j, ip))
+
+    for i, j, ip in ups:
+        down_cell[i][j] = "."
+        down_cell[ip][j] = "v"
+
+    moved_down = len(ups) > 0
+
+    moved = moved_right or moved_down
+
+    return down_cell, moved
+
+
+def advent_solve(state):
+    """
+    Iterate advent_step until a steady state is reached.
+    """
+
+    grid = deepcopy(state)
+    steps = 0  # step count
+    while True:
+        steps += 1
+        grid, moved = advent_step(grid)
+        if not moved:
+            return steps
+```
+
+
+
+### NumPy
+
+```{python 4_task1_advent_np}
+def advent_step_np(state):
+    """
+    Advance the Advent of Code grid by exactly one step using a NumPy ndarray.
+
+    The update is performed in two phases. First move all '>' right, then move all
+    'v' down. Moves are applied simultaneously within each phase.
+
+    Returns:
+    psi (np.ndarray): the updated grid after both phases
+    moved (bool): True if at least one '>' or 'v' moved
+    """
+
+    right_cell = state.copy()
+    right_cell[:, :-1] = state[:, 1:]  # right_cell[i, j] = state[i, j+1]
+    right_cell[:, -1] = state[:, 0]  # wrap-around, right_cell[i, W-1] = state[i, 0]
+
+    tau = (state == ">") & (right_cell == ".")  # when '>' can move right
+
+    phi = state.copy()
+
+    # only update if any '>' moves
+    if tau.any():
+        phi[tau] = "."  # phi[i, j] = '.' for all (i,j) with tau[i,j]=True
+
+        dest_r = tau.copy()
+        dest_r[:, 1:] = tau[:, :-1]  # dest_r[i, j] = tau[i, j-1]
+        dest_r[:, 0] = tau[:, -1]  # dest_r[i, 0] = tau[i, W-1]
+        phi[dest_r] = ">"  # phi[i, j] = '>' for all (i,j) with dest_r[i,j]=True
+
+    down_cell = phi.copy()
+    down_cell[:-1, :] = phi[1:, :]  # down_cell[i, j] = phi[i+1, j]
+    down_cell[-1, :] = phi[0, :]  # wrap-around, down_cell[H-1, j] = phi[0, j]
+
+    ups = (phi == "v") & (down_cell == ".")  # when 'v' can move down
+
+    psi = phi.copy()
+
+    # only update if any 'v' moves
+    if ups.any():
+        psi[ups] = "."  # psi[i, j] = '.' for all (i,j) with ups[i,j]=True
+
+        dest_d = ups.copy()
+        dest_d[1:, :] = ups[:-1, :]  # dest_d[i, j] = ups[i-1, j]
+        dest_d[0, :] = ups[-1, :]  # dest_d[0, j] = ups[H-1, j]
+        psi[dest_d] = "v"  # psi[i, j] = 'v' for all (i,j) with dest_d[i,j]=True
+
+    moved = bool(tau.any() or ups.any())  # check if any '>' or'v' moved
+    return psi, moved
+
+
+def advent_solve_np(state):
+    """
+    Repeatedly apply advent_step_np until a steady state is reached.
+
+    Returns:
+    steps: the number of steps required to reach steady state
+    """
+
+    grid = state.copy()
+    steps = 0  # step count
+    while True:
+        steps += 1
+        grid, moved = advent_step_np(grid)
+        if not moved:
+            return steps  # if not moved, return number of steps
+```
+
+### Tests
+
+```{python 5_task1_test1}
+#| error: true
+assert advent_solve(small) == 58
+```
+```{python 6_task1_test2}
+#| error: true
+assert advent_solve(large) == 351
+```
+```{python 7_task1_test3}
+#| error: true
+assert advent_solve_np(small_np) == 58
+```
+```{python 8_task1_test4}
+#| error: true
+assert advent_solve_np(large_np) == 351
+```
+
+### Timing
+
+```{python 9_task1_test5}
+%timeit -r 3 advent_solve(small)
+```
+
+```{python 10_task1_test6}
+%timeit -r 3 advent_solve_np(small_np)
+```
+
+```{python 11_task1_test7}
+%timeit -r 3 advent_solve(large)
+```
+
+```{python 12_task1_test8}
+%timeit -r 3 advent_solve_np(large_np)
+```
+
+### Write-up
+
+<!-- Write a brief comparison of the two implementations here. Discuss any
+     differences in speed you observed and why you think they occurred. -->
+
+We compare the base Python and NumPy implementations using %timeit. On the small grid, advent_solve_np(small_np) is about 2 times faster than advent_solve(small) (≈0.543 ms vs. ≈1.14 ms). On the large grid, the speedup is much more significant. Advent_solve_np(large_np) is about 14 times faster than the base Python version (≈62.4 ms vs. ≈875 ms).
+
+The NumPy implementation is faster. The base Python version relies on nested Python loops and repeatedly uses deepcopy() on a list of list, so each step spends a lot of time in Python loops and copying. In contrast, the NumPy version avoids this by using vectorized array operations. We uses slicing to build the right-neighbor and down-neighbor views of the grid. We also uses boolean masks to mark which '>' and 'v' are allowed to move. Moreover, boolean indexing is used to update all starting cells and destination cells at once, so the moves happen simultaneously. Because NumPy runs these operations in fast compiled code, Python does less looping work. On the small grid, both versions are already pretty fast, so the difference is limited. On the large grid, the Python version has to loop over many more cells one by one, while NumPy updates many cells at once, so the speedup becomes much bigger.
+
+---
+
+## Task 2
+
+```{python 13_task2_generate_pd_matrix}
+def gen_pos_def(n, seed, ls=1.0, s2=1.0, nug=0.01):
+    rng = np.random.default_rng(seed=seed)
+    x = rng.uniform(size=n)
+    d = np.abs(x - x.reshape((n, 1)))
+
+    return s2 * np.exp(-np.abs(d / ls)) + np.diag([nug] * n)
+```
+
+### Part 1
+
+```{python 14_task2_part1}
+def chol_inverse(Sigma):
+    # Compute the Cholesky decomposition L
+    # Sigma = L @ L.T
+    L = np.linalg.cholesky(Sigma)
+
+    # Get the identity matrix of the same size
+    n = Sigma.shape[0]
+    I = np.eye(n)
+
+    # Solve L @ L_inv = I to find the inverse of the lower triangular L
+    # This uses the O(n^2) backsolving (forward substitution here)
+    L_inv = solve_triangular(L, I, lower=True)
+
+    # Sigma^-1 = (L^-1).T @ (L^-1)
+    return L_inv.T @ L_inv
+```
+
+### Part 2
+
+```{python 15_task2_part2}
+sizes = [100, 500, 1000, 2500, 5000, 7500, 10000]
+results_list = []
+
+# Generate the matrix only once, then obtain smaller matrices by
+# subsetting the largest one. Any principal submatrix of a PD matrix
+# remains PD, which significantly improves performance.
+Sigma_full = gen_pos_def(max(sizes), seed=42)
+
+for n in sizes:
+    Sigma = Sigma_full[0:n,0:n]
+    
+    # Capture TimeitResult objects using the -o flag
+    # -q suppresses the console output to keep the loop clean
+    t_res_chol = %timeit -n 1 -r 3 -o chol_inverse(Sigma)
+    t_res_np = %timeit -n 1 -r 3 -o np.linalg.inv(Sigma)
+    
+    # Extract the 'average' attribute from the TimeitResult objects
+    results_list.append({
+        "n": n,
+        "Cholesky Time (s)": t_res_chol.average,
+        "NumPy Time (s)": t_res_np.average
+    })
+
+# Format into a clean table
+results_df = pd.DataFrame(results_list)
+results_df["Speedup"] = results_df["NumPy Time (s)"] / results_df["Cholesky Time (s)"]
+
+print(results_df.to_string(index=False))
+```
+
+### Write-up
+
+Let $\Sigma\in \mathbb{R}^{n\times n}$ be a positive definite matrix. By the Cholesky decomposition, we can write a unique lower traiangular matrix $L$ with positive diagonal entries such that 
+
+$$\Sigma = LL^\top.$$ 
+
+Then 
+
+$$\Sigma^{-1} = (L^\top)^{-1} L^{-1} = (L^{-1})^\top L^{-1}$$
+
+Our function `chol_inverse()` implements this by firstly computing the Cholesky factor $L$ using `np.linalg.cholesky()`. Then, we solve for $L^{-1}$ leveraging a triangular system
+
+$$LX = I$$ 
+
+Because $L$ is triangular, `scipy.linalg.solve_triangular()` uses forward substitution, which is computationally efficient and numerically stable. The solution is $X = L^{-1}$. Finally, we compute $\Sigma^{-1}$ as $(L^{-1})^\top L^{-1}$. This procedure makes strategic use of the SPD structure of $\Sigma$. While the overall complexity is still $O(n^3)$ due to the Cholesky decomposition, the computation is more stable than explicitly inverting $\Sigma$ using `np.linalg.inv()`.
+
+For benchmarking, we generate the positive definite matrix only once and obtain matrices of different sizes by directly subsetting the largest matrix. Since any principal submatrix of a positive definite matrix is itself positive definite, this approach significantly improves performance. We measured the execution time of both `chol_inverse()` and `np.linalg.inv()` across different matrix sizes. Timings were recorded with `%timeit` with one execution per repeat and three repeats. For small matrices (e.g., $n=100$), `np.linalg.inv()` is faster than our implementation. At these sizes, the total runtime is very small, and the overheads dominate. However, as $n$ increases, our implementation becomes significantly faster than `np.linalg.inv()`. For $n=10000$, `chol_inverse()` exhibits a clear advantage, being over 2.5x faster than `np.linalg.inv()`. This supports the idea that leveraging the structure of positive definite matrices through Cholesky decomposition can yield substantial performance benefits, especially as matrix size grows.
+
+---
+
+## Task 3
+
+### Part 1
+
+In Part 1, we implemented `mc_mass(d, n_sim, breaks, seed)` to estimate shell probability mass using Monte Carlo simulation.  
+The function draws n_sim samples from a d-dimensional standard normal distribution $N(0, I_d)$, computes each sample radius, assigns samples to shells defined by breaks, and calculates shell probabilities as counts / n_sim.  
+It also computes the average sampled radius within each shell and returns (avg_radii, probs).  
+We then ran the function for multiple dimensions (e.g., $d=1,2,5,25$) and plotted shell mass versus radius.
+
+```{python 16_task3_part1_func}
+def mc_mass(d, n_sim=1000000, breaks=np.linspace(0, 5, 51), seed=1234):
+    """Estimate MVN shell probability mass via Monte Carlo simulation.
+
+    Parameters
+    ----------
+    d : int
+        Number of dimensions.
+    n_sim : int, default=1000000
+        Number of samples drawn from N(0, I_d).
+    breaks : np.ndarray, default=np.linspace(0, 5, 51)
+        Shell boundaries in radius. For example, [0, 1, 2] defines
+        shells [0,1) and [1,2).
+    seed : int, default=1234
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    avg_radii : np.ndarray
+        Mean sampled radius within each shell. Empty shells are NaN.
+    probs : np.ndarray
+        Estimated probability mass for each shell (count / n_sim).
+    """
+    rng = np.random.default_rng(seed)
+
+    # Draw Monte Carlo samples from a d-dimensional standard normal.
+    x = rng.standard_normal(size=(n_sim, d))
+
+    # Convert each sample point to its Euclidean radius.
+    radii = np.linalg.norm(x, axis=1)
+
+    # Assign each radius to a shell index (0 ... K-1).
+    idx = np.digitize(radii, breaks, right=False) - 1
+    K = len(breaks) - 1
+
+    # Keep only radii that fall inside the provided shell range.
+    valid = (idx >= 0) & (idx < K)
+    idx_valid = idx[valid]
+    radii_valid = radii[valid]
+
+    # Count how many samples fall in each shell.
+    counts = np.bincount(idx_valid, minlength=K).astype(float)
+
+    # Sum radii per shell to compute shell-wise mean radius.
+    radius_sums = np.bincount(idx_valid, weights=radii_valid, minlength=K)
+
+    # Compute average sampled radius for each shell.
+    avg_radii = np.full(K, np.nan)
+    nonzero = counts > 0
+    avg_radii[nonzero] = radius_sums[nonzero] / counts[nonzero]
+
+    # Monte Carlo estimate of shell probability mass.
+    probs = counts / n_sim
+
+    return avg_radii, probs
+```
+
+```{python 17_task3_part1_plot_1dim}
+# The plot for d=1
+plt.cla()
+plt.plot(*mc_mass(1), label="1d")
+plt.legend()
+plt.show()
+```
+
+```{python 18_task3_part1_plot_2dim}
+# The plot for d=2
+plt.cla()
+plt.plot(*mc_mass(2), label="2d")
+plt.legend()
+plt.show()
+```
+
+```{python 19_task3_part1_plot_5dim}
+# The plot for d=5
+plt.cla()
+plt.plot(*mc_mass(5), label="5d")
+plt.legend()
+plt.show()
+```
+
+```{python 20_task3_part1_plot_25dim}
+# The plot for d=25
+plt.cla()
+plt.plot(*mc_mass(25, breaks=np.linspace(0, 8, 81)), label="25d")
+plt.legend()
+plt.show()
+```
+
+As dimensionality increases, the shell-mass curve shifts to larger radii and becomes more concentrated around a peak away from 0.  
+In low dimensions (e.g., $d=1,2$), the mass remains relatively near the center, but for $d=5$ and $$d=25$ the dominant mass clearly appears in outer shells.  
+This indicates that in the region where the bulk of the probability mass is concentrated, the peak is not located near the origin but at a certain distance from it.
+
+### Part 2
+
+In Part 2, we implemented `ni_mass(d, breaks)` for $d$ in $\{1,2,3\}$ using SciPy numerical integration.  
+We defined a cumulative ball-mass function $P(||X|| <= r)$ for $X ~ N(0, I_d)$, using quad $(d=1)$, dblquad $(d=2)$, and tplquad $(d=3)$.  
+To avoid duplicate computation, cumulative probabilities were evaluated once at all breakpoints, and shell masses were obtained by differencing adjacent cumulative values.  
+Representative shell radii were set to bin midpoints, and we plotted the resulting curves for $d=1,2,3$.
+
+```{python 21_task3_part2_func}
+def ni_mass(d, breaks=np.linspace(0, 5, 51)):
+    """Compute MVN shell probability mass using numerical integration.
+
+    This function supports d in {1, 2, 3} by integrating the standard
+    multivariate normal density over d-dimensional balls and then taking
+    differences between consecutive radii to obtain shell masses.
+
+    Parameters
+    ----------
+    d : int
+        Number of dimensions. Must be 1, 2, or 3.
+    breaks : np.ndarray, default=np.linspace(0, 5, 51)
+        Shell boundaries in radius. For example, [0, 1, 2] defines
+        shells [0,1) and [1,2).
+
+    Returns
+    -------
+    avg_radii : np.ndarray
+        Representative radius for each shell (bin midpoint).
+    masses : np.ndarray
+        Probability mass in each shell.
+    """
+
+    if d not in (1, 2, 3):
+        raise ValueError("ni_mass only supports d = 1, 2, 3")
+
+    breaks = np.asarray(breaks)
+
+    # Standard MVN density N(0, I_d).
+    mvn = multivariate_normal(mean=np.zeros(d), cov=np.eye(d))
+
+    def ball_mass(r):
+        """Return P(||X|| <= r) for X ~ N(0, I_d)."""
+        if r <= 0:
+            return 0.0
+
+        if d == 1:
+            # Integrate over [-r, r].
+            val, _ = quad(lambda x: mvn.pdf([x]), -r, r)
+            return val
+
+        if d == 2:
+            # Integrate over disk: x in [-r, r], y in [-sqrt(r^2-x^2), sqrt(r^2-x^2)].
+            def y_lower(x):
+                return -np.sqrt(r * r - x * x)
+
+            def y_upper(x):
+                return np.sqrt(r * r - x * x)
+
+            val, _ = dblquad(lambda y, x: mvn.pdf([x, y]), -r, r, y_lower, y_upper)
+            return val
+
+        if d == 3:
+            # Integrate over sphere using nested Cartesian bounds.
+            def y_lower(x):
+                return -np.sqrt(r * r - x * x)
+
+            def y_upper(x):
+                return np.sqrt(r * r - x * x)
+
+            def z_lower(x, y):
+                return -np.sqrt(r * r - x * x - y * y)
+
+            def z_upper(x, y):
+                return np.sqrt(r * r - x * x - y * y)
+
+            val, _ = tplquad(
+                lambda z, y, x: mvn.pdf([x, y, z]),
+                -r,
+                r,
+                y_lower,
+                y_upper,
+                z_lower,
+                z_upper,
+            )
+            return val
+
+    # Compute cumulative ball masses once at breakpoints.
+    cumulative = np.array([ball_mass(r) for r in breaks])
+
+    # Shell mass is the difference between adjacent cumulative masses.
+    masses = np.diff(cumulative)
+
+    # Use bin midpoints as representative shell radii.
+    avg_radii = 0.5 * (breaks[:-1] + breaks[1:])
+
+    return avg_radii, masses
+```
+
+```{python 22_task3_part2_plot}
+m1 = ni_mass(1)
+m2 = ni_mass(2)
+m3 = ni_mass(3)
+
+plt.cla()
+plt.plot(*m1, label="1d")
+plt.plot(*m2, label="2d")
+plt.plot(*m3, label="3d")
+plt.legend()
+plt.show()
+```
+
+Using numerical integration for $d\in \{1,2,3\}$ gives shell-mass curves consistent with the Monte Carlo pattern in low dimensions.  
+Compared with Monte Carlo, numerical integration provides smoother deterministic estimates in low dimensions, while becoming computationally expensive as d grows.
+
+### Part 3
+
+In Part 3, we compared outputs from `mc_mass` and `ni_mass` for $d\in \{1,2,3\}$ on the same plots.  
+For each dimension, we computed radius-mass pairs from both methods and plotted them together in separate subplots.  
+This step was used to check implementation consistency between Monte Carlo estimation and numerical integration in dimensions where both methods are available.
+
+```{python 23_task3_part3}
+# Compare Monte Carlo (MC) and Numerical Integration (NI) shell masses
+# for dimensions where both methods are available (d = 1, 2, 3).
+ni_results = {1: m1, 2: m2, 3: m3} #Reuse the results.
+fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+for i, d in enumerate((1, 2, 3)):
+    ar_mc, mass_mc = mc_mass(d)
+    ar_ni, mass_ni = ni_results[d]
+    ax = axes[i]
+    ax.plot(ar_mc, mass_mc, "o-", label="MC", alpha=0.8)
+    ax.plot(ar_ni, mass_ni, "s--", label="NI", alpha=0.8)
+    ax.set_xlabel("radius r")
+    ax.set_ylabel("probability mass")
+    ax.set_title(f"d = {d}")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+plt.suptitle("Direct comparison: Monte Carlo vs Numerical Integration")
+plt.tight_layout()
+plt.show()
+```
+
+From the plot, we can indeed confirm that the results obtained for both methods in $d\in \{1,2,3\}$ are similar.
+
+### Part 4
+
+In Part 4, we implemented `mc_peak_r` to extract the radius corresponding to the maximum shell mass from `mc_mass` output.  
+For each selected dimension, we generated an appropriate break range, computed the Monte Carlo peak radius, and printed it alongside $\sqrt{d-1}$.  
+This was done to numerically verify where the radial shell-mass peak occurs as a function of $d$.
+
+```{python 24_task3_part4}
+def mc_peak_r(d, n_sim=1000000, breaks=np.linspace(0, 5, 51), seed=1234):
+    """Return the shell radius where MC mass is maximal.
+
+    Parameters
+    ----------
+    d : int
+        Number of dimensions.
+    n_sim : int
+        Number of Monte Carlo samples.
+    breaks : np.ndarray
+        Shell boundaries in radius.
+    seed : int
+        Random seed.
+
+    Returns
+    -------
+    peak_radius : float
+        Representative radius (from mc_mass) at maximum shell mass.
+    peak_mass : float
+        Maximum shell probability mass.
+    i_max : int
+        Index of the shell with maximum mass.
+    """
+    # Compute shell radii and shell masses
+    avg_radii, probs = mc_mass(d=d, n_sim=n_sim, breaks=breaks, seed=seed)
+
+    # Locate the shell with the largest estimated mass
+    i_max = np.nanargmax(probs)
+    return avg_radii[i_max], probs[i_max], i_max
+
+
+dims = [1, 2, 3, 5, 10, 25, 50]
+
+for d in dims:
+    # Expand break range with d so the peak region is included
+    br = np.linspace(0, max(5, np.sqrt(d - 1) + 3), 101)
+
+    # Estimate MC peak radius and compare with sqrt(d-1)
+    r_hat, p_hat, _ = mc_peak_r(d=d, n_sim=1000000, breaks=br, seed=1234)
+    print(f"d={d:2d} | mc peak r={r_hat:.4f} | sqrt(d-1)={np.sqrt(d - 1):.4f}")
+```
+
+Both Part 1 and Part 2 reveal the same general pattern: as dimension $d$ increases, the probability mass shifts outward, and the region where probability mass concentrates also moves farther from the origin. Regarding where the maximum probability density appears, it can be observed that it occurs at the region where $\sqrt{d-1}$ as a function of $d$. This can be confirmed from the results of Monte Carlo and numerical integration for $d\in \{1, 2, 3\}$, and for higher dimensions, it can be verified via Monte Carlo using the results from `mc_peak_r()`. This indicates that although the probability density of the normal distribution has its maximum at the origin in any dimension, the probability mass in higher dimensions is concentrated away from the origin, in a thin shell at radius approximately $\sqrt{d-1}$.
+
+---
+
+## Task 4 - Data Frame Practice
+
+### Part 1
+
+We begin by combining the two datasets, `fisheries` and `continents`. Since the country names are used as the key for combining information across the two tables, we first standardize the `country` field in `fisheries`. In particular, several country names in `fisheries` do not exactly match the naming convention used in `continents` (e.g., “Hong Kong” vs “Hong Kong SAR China”), so we replace those entries to ensure consistent labels and avoid missing matches later.
+
+The combined dataframe is `fisheries_with_countries_and_continents`, which contains both fisheries production variables (e.g., `capture`, `aquaculture`, `total`) and the associated continent for each country. With the continent labels available, we summarize fisheries production at the continent level by grouping on `continent` and summing `capture`, `aquaculture`, and `total`. This yields `fisheries_summary_totals`, a compact table of continent-wide totals for each production category.
+
+Finally, we convert these totals into proportions by dividing each numeric column by its column sum across all continents. The resulting table, `fisheries_summary_ratios`, reports each continent’s share of global `capture`, `aquaculture`, and `total` production. We sort by `continent` for readability and print the final summary dataframe.
+
+```{python 25_task4_part1_code}
+fisheries = pl.read_csv("data/fisheries.csv")
+continents = pl.read_csv("data/continents.csv")
+
+# The "country" column in `fisheries` and `continents` are not perfectly aligned,
+# so we modify the former to match the latter.
+fisheries = fisheries.with_columns(
+    pl.col("country").replace(
+        ["Hong Kong", "Myanmar", "Democratic Republic of the Congo"],
+        ["Hong Kong SAR China", "Myanmar (Burma)", "Congo - Kinshasa"],
+    )
+)
+
+# Join the two dataframes to compute totals later
+fisheries_with_countries_and_continents = pl.concat(
+    [fisheries, continents], how="align_left"
+)
+
+# Compute totals
+fisheries_summary_totals = fisheries_with_countries_and_continents.group_by(
+    "continent"
+).agg(pl.col("capture").sum(), pl.col("aquaculture").sum(), pl.col("total").sum())
+
+# Compute proportions
+count_cols = pl.selectors.numeric()
+fisheries_summary_ratios = fisheries_summary_totals.with_columns(
+    count_cols / count_cols.sum()
+).sort("continent")
+```
+
+```{python 26_task4_part1_demo}
+# Present the final dataframe
+fisheries_summary_ratios
+```
+
+### Part 2
+
+#### Selecting relevant “new case” columns
+
+We first filter the dataset to retain only columns representing *new TB cases* that are already disaggregated by sex and age. These columns follow one of two naming conventions:
+
+* `new_<diag>_<sex+age>` for most diagnostic subtypes (e.g., `new_sp_m04`)
+* `newrel_<sex+age>` for the “new & relapse” category (e.g., `newrel_f1524`)
+
+To identify such columns, we match column names against the following regular expression:
+
+```regex
+^(new_[a-z]+_(?:[mf].+|sexunk.+)|newrel_(?:[mf].+|sexunk.+))$
+```
+
+Only columns matching this pattern are retained for further processing.
+
+#### Parsing codes from column names
+
+To interpret the encoded column names, we define a helper function `parse_new_var()`. Given a column name, the function extracts and returns a triple consisting of:
+
+* a **diagnostic method code** (e.g., `sp`, `sn`, `ep`, `rel`),
+* a **sex code** (`m`, `f`, or `unk`), and
+* an **age code** (e.g., `04`, `1524`, `15plus`, `unk`).
+
+The function explicitly handles both naming patterns (`new_...` and `newrel_...`). Any missing or ambiguous sex and age information is standardized to `unk` to ensure consistency.
+
+#### Reshaping to long format and labeling categories
+
+After selecting the relevant columns, we keep only `country`, `g_whoregion`, `year`, and the demographic case-count variables. The data are then reshaped into *long format* using `melt()`, producing one row per observation with the structure:
+
+```
+country | g_whoregion | year | variable | cases
+```
+
+Here, `variable` denotes a tag such as `new_sp_m04`, which encodes diagnostic method, sex, and age group, while `cases` gives the corresponding number of reported cases.
+
+Next, we apply `parse_new_var()` to each `variable` to extract diagnostic method, sex, and age codes into separate columns. These codes are then mapped to human-readable labels using three dictionaries:
+
+* `diag_map` for diagnostic methods,
+* `gender_map` for sex categories, and
+* `age_map` for age ranges.
+
+Finally, the case counts are coerced to integer type (`Int64`), with non-numeric entries safely converted to `pd.NA`.
+
+#### Pivoting back to a structured wide table
+
+In the final step, we pivot the long-format data back into a wide table. The index consists of `country`, `who_region`, and `year`, while the columns form a three-level MultiIndex corresponding to:
+
+```
+diagnostic method, gender, age range
+```
+
+A top-level column label `# of cases` is added to clarify the meaning of the values. After resetting the index, the resulting data frame `who_full` is a tidy, analysis-ready table: each row represents a country–year observation, and each column corresponds to a specific diagnostic method and demographic subgroup. This structure facilitates aggregation, comparison across demographic groups, and subsetting using the MultiIndex column labels.
+
+```{python 27_task4_part2_data_and_func}
+who = pd.read_csv("data/TB_notifications_2022-02-06.csv")
+
+# Keep only the "new case" columns that are already broken down by sex and age
+# Examples:
+#   new_sp_m04, new_sn_f1524, new_ep_sexunkageunk, newrel_m1014, ...
+detail_pat = re.compile(
+    r"^(new_[a-z]+_(?:[mf].+|sexunk.+)|newrel_(?:[mf].+|sexunk.+))$"
+)
+detail_cols = [c for c in who.columns if detail_pat.match(c)]
+
+# Map diagnostic method, sex, and age-range codes to descriptive labels
+age_map = {
+    "04": "0-4",
+    "59": "5-9",
+    "1014": "10-14",
+    "514": "5-14",
+    "014": "0-14",
+    "1519": "15-19",
+    "2024": "20-24",
+    "1524": "15-24",
+    "2534": "25-34",
+    "3544": "35-44",
+    "4554": "45-54",
+    "5564": "55-64",
+    "65": "65+",
+    "15plus": "15+",
+    "u": "Unknown",
+    "unk": "Unknown",
+}
+gender_map = {"m": "Male", "f": "Female", "unk": "Unknown", None: "All"}
+diag_map = {
+    "sp": "Smear positive pulmonary",
+    "sn": "Smear negative pulmonary",
+    "ep": "Extrapulmonary",
+    "rel": "New & relapse",
+}
+
+
+def parse_new_var(var: str):
+    """
+    Parse WHO 'new...' variable names into:
+      diagnostic method code, sex code, age code.
+
+    For example, `new_sp_m04` is be parsed as:
+        diagnostic method code = sp,
+        sex code = m,
+        age code = 04.
+    """
+    diag = sex = age = None
+
+    # First, extract the diagnostic method code.
+    # The sex and age codes are contained in `rest`.
+    if var.startswith("new_"):
+        # new_<diag>_<rest>
+        _, diag, rest = var.split("_", 2)
+    elif var.startswith("newrel_"):
+        # newrel_<rest>
+        diag = "rel"
+        _, rest = var.split("_", 1)
+
+    # Second, extract the sex and age codes from `rest`.
+    if rest.startswith("sexunk"):
+        sex = "unk"
+        age = rest[len("sexunk") :]
+        age = "unk" if (age == "" or age == "ageunk") else age
+    else:
+        m = re.match(r"^([mfu])(.+)$", rest)
+        if m:
+            sex = {"m": "m", "f": "f", "u": "unk"}[m.group(1)]
+            age = m.group(2)
+        else:
+            sex, age = "unk", rest
+
+    if age in (None, "", "ageunk"):
+        age = "unk"
+
+    return diag, sex, age
+```
+
+```{python 28_task4_part2_code}
+who_long = (
+    # Keep only columns with relevant information
+    who[["country", "g_whoregion", "year"] + detail_cols]
+    # Convert the dataframe to long format
+    .melt(
+        id_vars=["country", "g_whoregion", "year"],
+        var_name="variable",
+        value_name="cases",
+    )
+    # Extract the diagnostic method, sex, and age codes
+    .assign(
+        diag_code=lambda d: d["variable"].map(lambda v: parse_new_var(v)[0]),
+        sex_code=lambda d: d["variable"].map(lambda v: parse_new_var(v)[1]),
+        age_code=lambda d: d["variable"].map(lambda v: parse_new_var(v)[2]),
+    )
+    .drop(columns=["variable"])
+    .rename(columns={"g_whoregion": "who_region"})
+    # Convert diagnostic method, sex, and age-range codes to descriptive labels
+    .assign(
+        diagnostic_method=lambda d: d["diag_code"].map(diag_map),
+        gender=lambda d: d["sex_code"].map(gender_map),
+        age_range=lambda d: d["age_code"].map(age_map),
+        cases=lambda d: pd.to_numeric(d["cases"], errors="coerce").astype("Int64"),
+    )
+    .drop(columns=["diag_code", "sex_code", "age_code"])
+)
+
+# Convert the dataframe back to wide format.
+who_full = who_long.pivot(
+    index=["country", "who_region", "year"],
+    columns=["diagnostic_method", "gender", "age_range"],
+    values="cases",
+)
+
+# Put "# of cases" as the top level of the column MultiIndex
+who_full.columns = pd.MultiIndex.from_tuples(
+    [("# of cases",) + tuple(col) for col in who_full.columns],
+    names=["metric", "diagnostic_method", "gender", "age_range"],
+)
+
+# Bring index columns back as regular columns
+who_full = who_full.reset_index()
+```
+
+```{python 29_task4_part2_demo1}
+# Display the overall structure of `who_full`
+who_full
+```
+
+```{python 30_task4_part2_demo2}
+# Display the first few rows with non-missing values in `who_full`
+who_full.iloc[0:33, :]
+```
+
+```{python 31_task4_part2_save_result}
+# Save the tidy data frame for later inspection
+who_full.to_csv("data/who_full.csv")
+```
